@@ -69,7 +69,7 @@ def read_sn_csv(file_name):
         csv_dict_reader = DictReader(inventory)
 
         for device in csv_dict_reader:
-            sn_list[device["List of SNs"]] = device["hostname"]
+            sn_list[device["Serial Number"]] = device["Hostname"]
 
     return sn_list
 
@@ -200,10 +200,23 @@ def site_selection_menu(site_list):
     return selected_site
 
 
+def get_device_list_ready_to_claim(base_url, token):
+    headers = {
+        'x-auth-token': token,
+        'Accept': 'application/json'
+    }
+
+    endpoint = "/api/v1/onboarding/pnp-device?state=Unclaimed%2CPlanned&offset=0&limit=1000"
+
+    response = requests.request("GET", url=base_url + endpoint, headers=headers, verify=False)
+    return response.json()
+
+
 def main():
-    base_url = input("Enter DNAC URL. eg. dnac.cisco.com:  ")
-    username = input("Enter Username:  ")
+    base_url = "https://10.8.6.56"
+    username = "admin"
     password = getpass.getpass("Enter DNAC password:  ")
+    unc_dev_list = []
 
     # 1. Read SN list from CSV
     sn_dict = read_sn_csv("sn_list.csv")
@@ -212,10 +225,22 @@ def main():
     token = get_auth_token(base_url, username, password)
 
     # 3. Get Device ID ready to be claimed
-    device_ids = get_device_id(base_url, token)
+    #device_ids = get_device_id(base_url, token)
+    unclaimed_devs = get_device_list_ready_to_claim(base_url, token)
 
     # 4. create SN to ID mapping
-    sn_to_id_dict = sn_to_id(device_ids)
+    sn_to_id_dict = sn_to_id(unclaimed_devs)
+
+    for dev in unclaimed_devs:
+        unc_dev_list.append(dev.get('deviceInfo').get('serialNumber'))
+
+    intersection = list(set(unc_dev_list) & set(list(sn_dict.keys())))
+
+    print("List of Devices ready to be claimed", len(intersection), "out of", len(sn_dict), "provided.")
+    for valid_sn in intersection:
+        print(valid_sn)
+
+    print()
 
     # 5. Get sites
     raw_sites = get_sites(base_url, token)
@@ -225,7 +250,12 @@ def main():
 
     # 6. Start Discovery
     for sn, hostname in sn_dict.items():
-        claim_site_pnp(base_url, token, sn_to_id_dict[sn], selected_site[1], hostname)
+        if sn in intersection:
+            claim_site_pnp(base_url, token, sn_to_id_dict[sn], selected_site[1], hostname)
+            print()
+        else:
+            print(sn, "cannot be claimed! It is not in then list of unclaimed devices.")
+            print()
 
     print("Done!")
 
